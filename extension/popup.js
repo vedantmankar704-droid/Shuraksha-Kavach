@@ -1,6 +1,6 @@
 // Wait for DOM to be fully loaded
 document.addEventListener('DOMContentLoaded', function() {
-  console.log('Suraksha Kavach popup loaded - with trusted domain support');
+  console.log('Suraksha Kavach popup loaded - critical phishing detection');
   
   // Get DOM elements
   const statusElement = document.getElementById('status');
@@ -12,25 +12,28 @@ document.addEventListener('DOMContentLoaded', function() {
     return;
   }
   
-  // Trusted domains whitelist (same as scanner)
+  // STRICT exact-match trusted domains whitelist only
   const TRUSTED_DOMAINS = [
     'github.com',
     'google.com',
-    'chatgpt.com', 
     'openai.com',
-    'microsoft.com',
-    'linkedin.com'
+    'chatgpt.com'
   ];
   
-  // Function to check if domain is trusted
-  function isTrustedDomain(hostname) {
-    return TRUSTED_DOMAINS.some(trusted => {
-      // Exact match
-      if (hostname === trusted) return true;
-      // Subdomain match
-      if (hostname.endsWith('.' + trusted)) return true;
-      return false;
-    });
+  // Function to check if domain is EXACTLY trusted (no subdomains)
+  function isExactTrustedDomain(hostname) {
+    return TRUSTED_DOMAINS.includes(hostname);
+  }
+  
+  // Function to extract hostname from URL
+  function extractHostname(url) {
+    try {
+      const urlObj = new URL(url);
+      return urlObj.hostname;
+    } catch (error) {
+      console.error('Error extracting hostname:', error);
+      return '';
+    }
   }
   
   // State management
@@ -40,13 +43,18 @@ document.addEventListener('DOMContentLoaded', function() {
   let lastUpdateTime = 0;
   
   // Function to get risk label based on score and trust level
-  function getRiskLabel(score, trustLevel) {
-    // Priority 1: Trusted domains always show "Trusted Website"
+  function getRiskLabel(score, trustLevel, urlAnalysis) {
+    // Priority 1: Exact trusted domains
     if (trustLevel === 'trusted') {
       return 'Trusted Website';
     }
     
-    // Priority 2: Normal risk scoring for unknown domains
+    // Priority 2: High risk phishing indicators
+    if (urlAnalysis && urlAnalysis.suspiciousKeywordCount >= 3) {
+      return 'High Risk';
+    }
+    
+    // Priority 3: Normal risk scoring
     if (score === 0) {
       return 'Safe';
     } else if (score >= 1 && score <= 19) {
@@ -60,13 +68,18 @@ document.addEventListener('DOMContentLoaded', function() {
   }
   
   // Function to get risk color based on score and trust level
-  function getRiskColor(score, trustLevel) {
+  function getRiskColor(score, trustLevel, urlAnalysis) {
     // Trusted domains always get green color
     if (trustLevel === 'trusted') {
       return '#388e3c'; // Green
     }
     
-    // Normal color logic for unknown domains
+    // High risk phishing indicators get red
+    if (urlAnalysis && urlAnalysis.suspiciousKeywordCount >= 3) {
+      return '#d32f2f'; // Red
+    }
+    
+    // Normal color logic
     if (score === 0) {
       return '#388e3c'; // Green
     } else if (score >= 1 && score <= 19) {
@@ -83,7 +96,7 @@ document.addEventListener('DOMContentLoaded', function() {
   function showLoadingState() {
     statusElement.textContent = 'Scanning...';
     statusElement.style.color = '#666666';
-    detailsElement.innerHTML = '<small>Analyzing current page...</small>';
+    detailsElement.innerHTML = '<small>Analyzing URL structure for phishing indicators...</small>';
   }
   
   // Function to get active tab info instantly
@@ -103,43 +116,53 @@ document.addEventListener('DOMContentLoaded', function() {
     });
   }
   
-  // Function to extract hostname from URL
-  function extractHostname(url) {
-    try {
-      const urlObj = new URL(url);
-      return urlObj.hostname;
-    } catch (error) {
-      console.error('Error extracting hostname:', error);
-      return '';
-    }
-  }
-  
-  // Function to display scan results with enhanced trusted domain support
+  // Function to display scan results with enhanced phishing detection
   function displayScanResults(scan, tabUrl) {
     // Extract hostname to check trust level
     const hostname = extractHostname(tabUrl || scan.url || '');
-    const trustLevel = isTrustedDomain(hostname) ? 'trusted' : 'unknown';
+    const trustLevel = isExactTrustedDomain(hostname) ? 'trusted' : 'unknown';
     
-    const riskLabel = getRiskLabel(scan.score, trustLevel);
-    const riskColor = getRiskColor(scan.score, trustLevel);
+    const urlAnalysis = scan.urlAnalysis || {};
+    const riskLabel = getRiskLabel(scan.score, trustLevel, urlAnalysis);
+    const riskColor = getRiskColor(scan.score, trustLevel, urlAnalysis);
     
-    // Enhanced status display for trusted domains
+    // Enhanced status display for phishing detection
     if (trustLevel === 'trusted') {
-      statusElement.innerHTML = `🛡️ ${riskLabel}<br><small style="color: ${riskColor}; font-weight: normal;">Score: ${scan.score}</small>`;
+      statusElement.innerHTML = `<strong>Trusted Website</strong><br><small style="color: ${riskColor}; font-weight: normal;">Risk Score: ${scan.score}</small>`;
+    } else if (urlAnalysis.suspiciousKeywordCount >= 3) {
+      statusElement.innerHTML = `<strong>PHISHING WARNING</strong><br><small style="color: ${riskColor}; font-weight: normal;">Risk Score: ${scan.score}</small>`;
     } else {
       statusElement.textContent = `Risk Score: ${scan.score} (${riskLabel})`;
     }
     statusElement.style.color = riskColor;
     
-    // Build details HTML
+    // Build details HTML with enhanced phishing information
     let detailsHTML = '<strong>URL:</strong><br>' + 
                      (tabUrl || scan.url || 'Unknown') + 
-                     '<br><br><strong>Reasons:</strong><br>';
+                     '<br><br><strong>Security Analysis:</strong><br>';
     
-    if (scan.reasons && scan.reasons.length > 0) {
-      detailsHTML += scan.reasons.join('<br>');
+    // Show URL analysis results
+    if (urlAnalysis.suspiciousKeywordCount > 0) {
+      detailsHTML += `<br><strong style="color: ${riskColor};">PHISHING INDICATORS DETECTED:</strong><br>`;
+      detailsHTML += `&bull; Suspicious keywords found: <strong>${urlAnalysis.suspiciousKeywords.join(', ')}</strong><br>`;
+      detailsHTML += `&bull; Keyword count: <strong>${urlAnalysis.suspiciousKeywordCount}</strong><br>`;
+      
+      if (scan.reasons && scan.reasons.length > 0) {
+        detailsHTML += '<br><strong>Detailed Reasons:</strong><br>';
+        scan.reasons.forEach(reason => {
+          detailsHTML += `&bull; ${reason}<br>`;
+        });
+      }
     } else {
-      detailsHTML += 'No issues found';
+      detailsHTML += '<br>No suspicious keywords detected in URL structure<br>';
+    }
+    
+    // Show structural issues
+    if (urlAnalysis.structuralIssues && urlAnalysis.structuralIssues.length > 0) {
+      detailsHTML += '<br><strong>Structural Issues:</strong><br>';
+      urlAnalysis.structuralIssues.forEach(issue => {
+        detailsHTML += `&bull; ${issue}<br>`;
+      });
     }
     
     // Add timestamp
@@ -148,49 +171,64 @@ document.addEventListener('DOMContentLoaded', function() {
       detailsHTML += '<br><br><small>Last scanned: ' + scanTime + '</small>';
     }
     
-    // Enhanced risk assessment for trusted domains
-    detailsHTML += '<br><br><div style="padding: 8px; border-radius: 4px; background: ' + 
+    // Enhanced risk assessment
+    detailsHTML += '<br><br><div style="padding: 10px; border-radius: 4px; background: ' + 
                  riskColor + '20; border-left: 3px solid ' + riskColor + '; margin-top: 8px;">';
-    detailsHTML += '<strong style="color: ' + riskColor + ';">Risk Assessment:</strong><br>';
+    detailsHTML += '<strong style="color: ' + riskColor + '; font-size: 14px;">Risk Assessment:</strong><br>';
     detailsHTML += '<span style="color: ' + riskColor + ';">';
     
     if (trustLevel === 'trusted') {
-      detailsHTML += '<strong>🛡️ Trusted Website</strong><br>';
-      detailsHTML += 'This is a known legitimate platform. Security features are active but risk is significantly reduced.';
+      detailsHTML += '<strong>Verified Trusted Platform</strong><br>';
+      detailsHTML += 'This is an officially trusted domain with significantly reduced risk.';
+    } else if (urlAnalysis.suspiciousKeywordCount >= 3) {
+      detailsHTML += '<strong>PHISHING THREAT DETECTED</strong><br>';
+      detailsHTML += 'This URL shows strong indicators of being a phishing attempt.<br>';
+      detailsHTML += '<strong>DO NOT enter passwords, OTP, or banking information.</strong>';
+    } else if (scan.score >= 40) {
+      detailsHTML += '<strong>High Risk Website</strong><br>';
+      detailsHTML += 'Multiple suspicious indicators detected. Exercise extreme caution.';
+    } else if (scan.score >= 20) {
+      detailsHTML += '<strong>Medium Risk Website</strong><br>';
+      detailsHTML += 'Some suspicious indicators detected. Be careful with sensitive information.';
+    } else if (scan.score > 0) {
+      detailsHTML += '<strong>Low Risk Website</strong><br>';
+      detailsHTML += 'Minor indicators detected. Generally safe but stay vigilant.';
     } else {
-      detailsHTML += 'This website is classified as <strong>' + riskLabel + '</strong>';
-      
-      if (scan.score >= 40) {
-        detailsHTML += '<br>⚠️ Exercise extreme caution';
-      } else if (scan.score >= 20) {
-        detailsHTML += '<br>⚠️ Be careful with sensitive information';
-      } else if (scan.score > 0) {
-        detailsHTML += '<br>✅ Generally safe but stay vigilant';
-      } else {
-        detailsHTML += '<br>✅ Appears to be safe';
-      }
+      detailsHTML += '<strong>Safe Website</strong><br>';
+      detailsHTML += 'No suspicious indicators detected. Appears to be legitimate.';
     }
     
     detailsHTML += '</span></div>';
     
-    // Add trust indicator for trusted domains
+    // Add trust indicator for exact trusted domains only
     if (trustLevel === 'trusted') {
-      detailsHTML += '<br><div style="padding: 6px; border-radius: 4px; background: #e8f5e8; border: 1px solid #4caf50; margin-top: 8px; text-align: center;">';
-      detailsHTML += '<span style="color: #2e7d32; font-weight: bold; font-size: 12px;">✓ VERIFIED TRUSTED PLATFORM</span>';
-      detailsHTML += '</div>';
+      detailsHTML += '<br><div style="padding: 8px; border-radius: 4px; background: #e8f5e8; border: 2px solid #4caf50; margin-top: 8px; text-align: center;">';
+      detailsHTML += '<span style="color: #2e7d32; font-weight: bold; font-size: 13px;">';
+      detailsHTML += 'VERIFIED TRUSTED DOMAIN<br>';
+      detailsHTML += 'Exact match with official whitelist';
+      detailsHTML += '</span></div>';
+    }
+    
+    // Add phishing warning for high-risk URLs
+    if (urlAnalysis.suspiciousKeywordCount >= 3 || scan.score >= 40) {
+      detailsHTML += '<br><div style="padding: 8px; border-radius: 4px; background: #ffebee; border: 2px solid #f44336; margin-top: 8px; text-align: center;">';
+      detailsHTML += '<span style="color: #c62828; font-weight: bold; font-size: 13px;">';
+      detailsHTML += 'PHISHING PROTECTION ACTIVE<br>';
+      detailsHTML += 'URL structure analysis detected threats';
+      detailsHTML += '</span></div>';
     }
     
     detailsElement.innerHTML = detailsHTML;
     
-    console.log('Enhanced display updated for:', tabUrl, 'Risk:', riskLabel, 'Trust:', trustLevel);
+    console.log('Enhanced phishing detection display updated for:', tabUrl, 'Risk:', riskLabel, 'Trust:', trustLevel, 'Keywords:', urlAnalysis.suspiciousKeywordCount);
   }
   
-  // Function to load and display scan results with optimization
+  // Function to load and display scan results
   async function loadScanResults() {
     try {
       // Debounce rapid calls
       const now = Date.now();
-      if (now - lastUpdateTime < 100) { // 100ms debounce
+      if (now - lastUpdateTime < 100) {
         return;
       }
       lastUpdateTime = now;
@@ -223,7 +261,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
       }
       
-      // Get scan data from storage (optimized)
+      // Get scan data from storage
       chrome.storage.local.get(['lastScan', 'lastUpdated'], function(data) {
         if (chrome.runtime.lastError) {
           console.error('Chrome runtime error:', chrome.runtime.lastError);
@@ -250,7 +288,7 @@ document.addEventListener('DOMContentLoaded', function() {
           return;
         }
         
-        // Display results with enhanced trusted domain support
+        // Display results with enhanced phishing detection
         displayScanResults(scan, tabInfo.url);
       });
       
@@ -267,7 +305,7 @@ document.addEventListener('DOMContentLoaded', function() {
     chrome.tabs.onActivated.addListener(function(activeInfo) {
       console.log('Tab activated:', activeInfo.tabId);
       clearTimeout(updateTimer);
-      updateTimer = setTimeout(loadScanResults, 50); // 50ms delay
+      updateTimer = setTimeout(loadScanResults, 50);
     });
     
     // Listen for tab updates
@@ -275,7 +313,7 @@ document.addEventListener('DOMContentLoaded', function() {
       if (changeInfo.status === 'complete' && tab.url) {
         console.log('Tab updated:', tab.url);
         clearTimeout(updateTimer);
-        updateTimer = setTimeout(loadScanResults, 50); // 50ms delay
+        updateTimer = setTimeout(loadScanResults, 50);
       }
     });
   }
@@ -287,16 +325,16 @@ document.addEventListener('DOMContentLoaded', function() {
   setupTabMonitoring();
   
   // Set up faster periodic refresh
-  setInterval(loadScanResults, 1000); // Reduced from 2000ms to 1000ms
+  setInterval(loadScanResults, 1000);
   
   // Listen for storage changes for instant updates
   chrome.storage.onChanged.addListener(function(changes, namespace) {
     if (namespace === 'local' && changes.lastScan) {
       console.log('Storage changed, updating popup instantly');
       clearTimeout(updateTimer);
-      updateTimer = setTimeout(loadScanResults, 10); // 10ms delay for instant update
+      updateTimer = setTimeout(loadScanResults, 10);
     }
   });
   
-  console.log('Suraksha Kavach popup initialized with trusted domain support');
+  console.log('Suraksha Kavach popup initialized with critical phishing detection');
 });

@@ -1,24 +1,21 @@
-// Suraksha Kavach Scanner - Enhanced with Trusted Domain Logic
+// Suraksha Kavach Scanner - Critical Phishing Detection Fix
 (function() {
     'use strict';
     
-    console.log('Suraksha Kavach: Scanner initializing - with trusted domains');
+    console.log('Suraksha Kavach: Scanner initializing - critical phishing detection');
     
-    // Trusted domains whitelist
+    // STRICT exact-match trusted domains whitelist only
     const TRUSTED_DOMAINS = [
         'github.com',
         'google.com',
-        'chatgpt.com', 
         'openai.com',
-        'microsoft.com',
-        'gmail.com',
-        'facebook.com',
-        'twitter.com',
-        'linkedin.com',
-        'stackoverflow.com',
-        'youtube.com',
-        'wikipedia.org',
-        'reddit.com'
+        'chatgpt.com'
+    ];
+    
+    // Suspicious phishing keywords
+    const PHISHING_KEYWORDS = [
+        'login', 'verify', 'bank', 'otp', 'password', 'secure', 
+        'reward', 'free', 'account', 'update', 'claim'
     ];
     
     // Global state
@@ -28,23 +25,140 @@
     let isScanning = false;
     let lastScanTime = 0;
     
-    // Function to check if domain is trusted
-    function isTrustedDomain(hostname) {
-        return TRUSTED_DOMAINS.some(trusted => {
-            // Exact match
-            if (hostname === trusted) return true;
-            // Subdomain match
-            if (hostname.endsWith('.' + trusted)) return true;
-            return false;
-        });
+    // Function to check if domain is EXACTLY trusted (no subdomains)
+    function isExactTrustedDomain(hostname) {
+        return TRUSTED_DOMAINS.includes(hostname);
     }
     
-    // Function to get domain trust level
-    function getTrustLevel(hostname) {
-        if (isTrustedDomain(hostname)) {
-            return 'trusted';
+    // Function to extract URL components for analysis
+    function analyzeUrlStructure(url) {
+        try {
+            const urlObj = new URL(url);
+            return {
+                hostname: urlObj.hostname,
+                pathname: urlObj.pathname,
+                search: urlObj.search,
+                fullUrl: url
+            };
+        } catch (error) {
+            console.error('URL parsing error:', error);
+            return {
+                hostname: '',
+                pathname: '',
+                search: '',
+                fullUrl: url
+            };
         }
-        return 'unknown';
+    }
+    
+    // Function to count suspicious keywords in text
+    function countPhishingKeywords(text) {
+        const lowerText = text.toLowerCase();
+        const found = [];
+        let count = 0;
+        
+        for (const keyword of PHISHING_KEYWORDS) {
+            if (lowerText.includes(keyword)) {
+                count++;
+                found.push(keyword);
+            }
+        }
+        
+        return { count, found };
+    }
+    
+    // Function to detect phishing indicators in URL structure
+    function detectUrlPhishingIndicators(urlStructure) {
+        const indicators = {
+            suspiciousKeywords: { count: 0, found: [], locations: [] },
+            structuralIssues: [],
+            riskScore: 0
+        };
+        
+        // Analyze hostname for suspicious keywords
+        const hostnameAnalysis = countPhishingKeywords(urlStructure.hostname);
+        if (hostnameAnalysis.count > 0) {
+            indicators.suspiciousKeywords.count += hostnameAnalysis.count;
+            indicators.suspiciousKeywords.found.push(...hostnameAnalysis.found);
+            indicators.suspiciousKeywords.locations.push(`hostname: ${hostnameAnalysis.found.join(', ')}`);
+            indicators.riskScore += hostnameAnalysis.count * 15; // Keywords in hostname are very suspicious
+        }
+        
+        // Analyze pathname for suspicious keywords
+        const pathnameAnalysis = countPhishingKeywords(urlStructure.pathname);
+        if (pathnameAnalysis.count > 0) {
+            indicators.suspiciousKeywords.count += pathnameAnalysis.count;
+            indicators.suspiciousKeywords.found.push(...pathnameAnalysis.found);
+            indicators.suspiciousKeywords.locations.push(`path: ${pathnameAnalysis.found.join(', ')}`);
+            indicators.riskScore += pathnameAnalysis.count * 10; // Keywords in path are suspicious
+        }
+        
+        // Analyze query parameters for suspicious keywords
+        const searchAnalysis = countPhishingKeywords(urlStructure.search);
+        if (searchAnalysis.count > 0) {
+            indicators.suspiciousKeywords.count += searchAnalysis.count;
+            indicators.suspiciousKeywords.found.push(...searchAnalysis.found);
+            indicators.suspiciousKeywords.locations.push(`query: ${searchAnalysis.found.join(', ')}`);
+            indicators.riskScore += searchAnalysis.count * 8; // Keywords in query are suspicious
+        }
+        
+        // Structural analysis
+        const hostname = urlStructure.hostname;
+        
+        // Multiple hyphens in hostname
+        const hyphenCount = (hostname.match(/-/g) || []).length;
+        if (hyphenCount > 2) {
+            indicators.structuralIssues.push(`Multiple hyphens in hostname (${hyphenCount})`);
+            indicators.riskScore += hyphenCount * 5;
+        }
+        
+        // Multiple subdomains
+        const subdomainCount = hostname.split('.').length - 2;
+        if (subdomainCount > 2) {
+            indicators.structuralIssues.push(`Multiple subdomains (${subdomainCount})`);
+            indicators.riskScore += subdomainCount * 8;
+        }
+        
+        // Long hostname
+        if (hostname.length > 50) {
+            indicators.structuralIssues.push(`Long hostname (${hostname.length} chars)`);
+            indicators.riskScore += 10;
+        }
+        
+        // Long URL overall
+        if (urlStructure.fullUrl.length > 100) {
+            indicators.structuralIssues.push(`Long URL (${urlStructure.fullUrl.length} chars)`);
+            indicators.riskScore += 8;
+        }
+        
+        // Suspicious TLDs
+        const suspiciousTlds = ['.tk', '.ml', '.ga', '.cf', '.xyz', '.top', '.click', '.free', '.net', '.work'];
+        const hasSuspiciousTld = suspiciousTlds.some(tld => hostname.toLowerCase().endsWith(tld));
+        if (hasSuspiciousTld) {
+            indicators.structuralIssues.push('Suspicious top-level domain');
+            indicators.riskScore += 25;
+        }
+        
+        // IP address in hostname
+        const ipPattern = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/;
+        if (ipPattern.test(hostname)) {
+            indicators.structuralIssues.push('IP address instead of domain');
+            indicators.riskScore += 30;
+        }
+        
+        // HTTP instead of HTTPS
+        if (!urlStructure.fullUrl.startsWith('https://')) {
+            indicators.structuralIssues.push('No HTTPS encryption');
+            indicators.riskScore += 20;
+        }
+        
+        // @ symbol in URL
+        if (urlStructure.fullUrl.includes('@')) {
+            indicators.structuralIssues.push('@ symbol in URL');
+            indicators.riskScore += 15;
+        }
+        
+        return indicators;
     }
     
     // Debounce function for performance
@@ -74,7 +188,7 @@
         };
     }
     
-    // Main scanning function with trusted domain logic
+    // Main scanning function with URL structure analysis
     function performScan() {
         try {
             // Prevent multiple simultaneous scans
@@ -84,166 +198,112 @@
             }
             
             const currentUrl = window.location.href;
-            const hostname = window.location.hostname;
             
             // Skip if same URL and recent scan
             const now = Date.now();
-            if (currentUrl === lastScannedUrl && (now - lastScanTime) < 5000) {
+            if (currentUrl === lastScannedUrl && (now - lastScanTime) < 3000) {
                 console.log('Suraksha Kavach: Same URL, skipping scan');
                 return;
             }
             
-            console.log('Suraksha Kavach: Scanning URL:', currentUrl, 'Domain:', hostname);
+            console.log('Suraksha Kavach: Scanning URL:', currentUrl);
             isScanning = true;
             lastScannedUrl = currentUrl;
             
-            // Check trust level first
-            const trustLevel = getTrustLevel(hostname);
-            const isTrusted = trustLevel === 'trusted';
+            // Analyze URL structure FIRST (before DOM content)
+            const urlStructure = analyzeUrlStructure(currentUrl);
+            console.log('Suraksha Kavach: URL structure analyzed:', urlStructure);
             
-            // Optimized page text extraction
-            const pageText = document.body ? 
-                document.body.innerText.toLowerCase().substring(0, 10000) : '';
+            // Check if domain is EXACTLY trusted
+            const isExactTrusted = isExactTrustedDomain(urlStructure.hostname);
+            console.log('Suraksha Kavach: Domain trust check:', urlStructure.hostname, '->', isExactTrusted);
             
-            // Calculate risk score with trusted domain logic
-            let score = 0;
-            const reasons = [];
+            // Detect phishing indicators from URL structure
+            const phishingIndicators = detectUrlPhishingIndicators(urlStructure);
+            console.log('Suraksha Kavach: Phishing indicators detected:', phishingIndicators);
             
-            // TRUSTED DOMAIN LOGIC - Significantly reduce risk
-            if (isTrusted) {
-                console.log('Suraksha Kavach: Trusted domain detected, applying reduced scoring');
+            // Calculate final risk score
+            let finalScore = phishingIndicators.riskScore;
+            let reasons = [];
+            
+            // Add reasons from URL analysis
+            if (phishingIndicators.suspiciousKeywords.count > 0) {
+                reasons.push(`Suspicious keywords found: ${phishingIndicators.suspiciousKeywords.found.join(', ')}`);
+                reasons.push(`Keywords in: ${phishingIndicators.suspiciousKeywords.locations.join('; ')}`);
+            }
+            
+            reasons.push(...phishingIndicators.structuralIssues);
+            
+            // Apply trust reduction ONLY for exact matches
+            if (isExactTrusted) {
+                console.log('Suraksha Kavach: Applying trusted domain reduction for EXACT match');
+                finalScore = Math.max(0, Math.round(finalScore * 0.1)); // 90% reduction for exact trusted domains
+                reasons.push('Exact trusted domain - risk significantly reduced');
+            }
+            // NO reduction for unknown domains or subdomains
+            
+            // Additional DOM-based analysis (only if needed)
+            let domAnalysisScore = 0;
+            if (document.body) {
+                const pageText = document.body.innerText.toLowerCase().substring(0, 5000);
                 
-                // For trusted domains, only apply critical security checks
-                // Rule 1: HTTP instead of HTTPS (still important)
-                if (!currentUrl.startsWith('https://')) {
-                    score += 5; // Reduced from 20 to 5
-                    reasons.push('No HTTPS encryption (reduced risk for trusted domain)');
-                }
-                
-                // Rule 2: URL length > 75 (less concerning for trusted sites)
-                if (currentUrl.length > 75) {
-                    score += 3; // Reduced from 15 to 3
-                    reasons.push('Long URL detected (reduced risk for trusted domain)');
-                }
-                
-                // Rule 3: Suspicious keywords - IGNORE for trusted domains
-                // Skip keyword detection entirely for trusted domains
-                console.log('Suraksha Kavach: Skipping keyword detection for trusted domain');
-                
-                // Rule 4: Password field - very low risk for trusted domains
+                // Password field detection
                 const passwordField = document.querySelector('input[type="password"]');
                 if (passwordField) {
-                    score += 2; // Reduced from 15 to 2
-                    reasons.push('Password field detected (normal for trusted domain)');
-                }
-                
-                // Rule 5: Login form - very low risk for trusted domains
-                const loginForm = document.querySelector('form');
-                if (loginForm) {
-                    score += 1; // Reduced from 10 to 1
-                    reasons.push('Login form detected (normal for trusted domain)');
-                }
-                
-            } else {
-                // UNKNOWN DOMAIN LOGIC - Apply full security checks
-                console.log('Suraksha Kavach: Unknown domain, applying full security scoring');
-                
-                // Rule 1: HTTP instead of HTTPS
-                if (!currentUrl.startsWith('https://')) {
-                    score += 20;
-                    reasons.push('No HTTPS encryption');
-                }
-                
-                // Rule 2: URL length > 75
-                if (currentUrl.length > 75) {
-                    score += 15;
-                    reasons.push('Long URL detected');
-                }
-                
-                // Rule 3: Hostname contains hyphen
-                if (hostname.includes('-')) {
-                    score += 10;
-                    reasons.push('Hyphenated domain');
-                }
-                
-                // Rule 4: Suspicious keywords (each +10) - only for unknown domains
-                const suspiciousKeywords = [
-                    'verify', 'otp', 'bank', 'urgent', 'password', 'login'
-                ];
-                
-                for (const keyword of suspiciousKeywords) {
-                    if (pageText.includes(keyword)) {
-                        score += 10;
-                        reasons.push(`Suspicious keyword: "${keyword}"`);
-                    }
-                }
-                
-                // Rule 5: Password input field (+15)
-                const passwordField = document.querySelector('input[type="password"]');
-                if (passwordField) {
-                    score += 15;
+                    domAnalysisScore += 5;
                     reasons.push('Password field detected');
                 }
                 
-                // Rule 6: Login form (+10)
+                // Login form detection
                 const loginForm = document.querySelector('form');
                 if (loginForm) {
-                    score += 10;
+                    domAnalysisScore += 3;
                     reasons.push('Login form detected');
+                }
+                
+                // Additional keywords in page content (lower weight)
+                const pageKeywordAnalysis = countPhishingKeywords(pageText);
+                if (pageKeywordAnalysis.count > 3) {
+                    domAnalysisScore += pageKeywordAnalysis.count * 2;
+                    reasons.push(`Multiple suspicious keywords in page content`);
                 }
             }
             
-            // Additional security checks (apply to all, but reduced for trusted)
-            const ipMultiplier = isTrusted ? 0.2 : 1.0; // 80% reduction for trusted
-            
-            // IP address in domain
-            const ipPattern = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/;
-            if (ipPattern.test(hostname)) {
-                score += Math.round(30 * ipMultiplier);
-                reasons.push('IP address instead of domain' + (isTrusted ? ' (reduced risk)' : ''));
-            }
-            
-            // Suspicious TLDs
-            const suspiciousTlds = ['.tk', '.ml', '.ga', '.cf', '.xyz', '.top', '.click'];
-            if (suspiciousTlds.some(tld => hostname.endsWith(tld))) {
-                score += Math.round(25 * ipMultiplier);
-                reasons.push('Suspicious top-level domain' + (isTrusted ? ' (reduced risk)' : ''));
-            }
-            
-            // Final score adjustment for trusted domains
-            if (isTrusted && score > 0) {
-                // Additional reduction for trusted domains
-                score = Math.max(0, Math.round(score * 0.3)); // 70% reduction
-                reasons.push('Trusted domain - risk significantly reduced');
-            }
+            // Final score calculation
+            const totalScore = finalScore + domAnalysisScore;
             
             // Create result
             const result = {
                 url: currentUrl,
-                hostname: hostname,
-                score: score,
+                hostname: urlStructure.hostname,
+                score: totalScore,
                 reasons: reasons,
-                trustLevel: trustLevel,
+                trustLevel: isExactTrusted ? 'trusted' : 'unknown',
+                urlAnalysis: {
+                    suspiciousKeywordCount: phishingIndicators.suspiciousKeywords.count,
+                    suspiciousKeywords: phishingIndicators.suspiciousKeywords.found,
+                    structuralIssues: phishingIndicators.structuralIssues,
+                    isExactTrusted: isExactTrusted
+                },
                 timestamp: Date.now()
             };
             
-            console.log('Suraksha Kavach: Scan result:', result);
+            console.log('Suraksha Kavach: Final scan result:', result);
             lastScanTime = now;
             
-            // Show warning banner if risky (higher threshold for trusted domains)
-            const warningThreshold = isTrusted ? 40 : 20; // Higher threshold for trusted
-            if (score >= warningThreshold) {
+            // Show warning banner if risky
+            if (totalScore >= 20) {
                 showWarningBanner();
             } else {
                 hideWarningBanner();
             }
             
-            // Send to background with optimized messaging
+            // Send to background
             chrome.runtime.sendMessage({
                 type: 'PHISH_SCAN_RESULT',
                 payload: result
             }, function(response) {
-                isScanning = false; // Reset scanning flag
+                isScanning = false;
                 if (chrome.runtime.lastError) {
                     console.error('Suraksha Kavach: Message error:', chrome.runtime.lastError);
                 } else {
@@ -257,18 +317,18 @@
         }
     }
     
-    // Warning banner functions (optimized)
+    // Warning banner functions
     function showWarningBanner() {
-        if (warningBanner) return; // Already showing
+        if (warningBanner) return;
         
         warningBanner = document.createElement('div');
         warningBanner.id = 'suraksha-warning-banner';
         warningBanner.innerHTML = `
-            ⚠ Warning: This website may be suspicious<br>
-            Do not enter password / OTP / bank details
+            <strong>PHISHING WARNING</strong><br>
+            This website shows strong signs of being a phishing attempt<br>
+            <small>Do not enter passwords, OTP, or banking information</small>
         `;
         
-        // Apply warning banner styles
         warningBanner.style.cssText = `
             position: fixed !important;
             top: 0 !important;
@@ -276,26 +336,24 @@
             width: 100% !important;
             background: #d32f2f !important;
             color: white !important;
-            padding: 12px 20px !important;
+            padding: 15px 20px !important;
             text-align: center !important;
             font-family: Arial, sans-serif !important;
             font-size: 14px !important;
             font-weight: bold !important;
             z-index: 999999 !important;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.3) !important;
-            border-bottom: 2px solid #b71c1c !important;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.4) !important;
+            border-bottom: 3px solid #b71c1c !important;
             line-height: 1.4 !important;
             animation: slideDown 0.3s ease-out !important;
         `;
         
-        // Insert at the beginning of body
         if (document.body) {
             document.body.insertBefore(warningBanner, document.body.firstChild);
             
-            // Push content down only if needed
             const currentMargin = document.body.style.marginTop;
             if (!currentMargin || currentMargin === '0px' || currentMargin === '') {
-                document.body.style.marginTop = '60px';
+                document.body.style.marginTop = '80px';
             }
         }
     }
@@ -308,7 +366,6 @@
                     warningBanner.remove();
                     warningBanner = null;
                     
-                    // Reset body margin
                     if (document.body) {
                         document.body.style.marginTop = '';
                     }
@@ -322,23 +379,23 @@
         if (window.location.href !== lastScannedUrl) {
             console.log('Suraksha Kavach: URL change detected');
             clearTimeout(scanTimer);
-            scanTimer = setTimeout(performScan, 500); // Reduced delay
+            scanTimer = setTimeout(performScan, 500);
         }
     }, 1000);
     
     // Initialize
-    console.log('Suraksha Kavach: Setting up scanner with trusted domains for:', window.location.href);
+    console.log('Suraksha Kavach: Setting up critical phishing detection for:', window.location.href);
     
     // Initial scan with reduced delay
     setTimeout(performScan, 500);
     
     // Optimized periodic checks
-    setInterval(checkUrlChange, 1500); // Reduced from 2000ms
+    setInterval(checkUrlChange, 1500);
     
     // Navigation events
     window.addEventListener('popstate', debounce(performScan, 300));
     
-    // SPA navigation with debouncing
+    // SPA navigation
     const originalPushState = history.pushState;
     const originalReplaceState = history.replaceState;
     
@@ -352,11 +409,11 @@
         setTimeout(checkUrlChange, 100);
     }, 200);
     
-    // Optimized DOM changes
+    // DOM changes
     if (document.body) {
         const observer = new MutationObserver(debounce(() => {
             clearTimeout(scanTimer);
-            scanTimer = setTimeout(checkUrlChange, 800); // Reduced delay
+            scanTimer = setTimeout(checkUrlChange, 800);
         }, 500));
         
         observer.observe(document.body, {
@@ -368,17 +425,17 @@
         });
     }
     
-    // Optimized message listener
+    // Message listener
     chrome.runtime.onMessage.addListener(function(message, sender, sendResponse) {
         if (message.type === 'FORCE_SCAN') {
             console.log('Suraksha Kavach: Force scan requested');
-            lastScannedUrl = ''; // Reset to force new scan
+            lastScannedUrl = '';
             performScan();
             sendResponse({ success: true });
         }
         return true;
     });
     
-    console.log('Suraksha Kavach: Scanner with trusted domain logic initialized successfully');
+    console.log('Suraksha Kavach: Critical phishing detection scanner initialized successfully');
     
 })();
