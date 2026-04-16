@@ -1,0 +1,81 @@
+/* Suraksha Kavach Extension Styles */
+
+/* Warning overlay for high risk sites */
+.suraksha-warning {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(255, 0, 0, 0.95);
+  color: white;
+  z-index: 999999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: Arial, sans-serif;
+}
+
+.suraksha-warning-content {
+  text-align: center;
+  padding: 20px;
+  max-width: 500px;
+}
+
+.suraksha-warning h1 {
+  font-size: 24px;
+  margin-bottom: 15px;
+}
+
+.suraksha-warning p {
+  margin-bottom: 10px;
+  line-height: 1.4;
+}
+
+.suraksha-warning button {
+  background: white;
+  color: red;
+  border: none;
+  padding: 10px 20px;
+  font-size: 16px;
+  cursor: pointer;
+  border-radius: 5px;
+  margin: 5px;
+}
+
+.suraksha-warning button:hover {
+  background: #f0f0f0;
+}
+
+/* Risk indicator badge */
+.suraksha-badge {
+  position: fixed;
+  top: 10px;
+  right: 10px;
+  padding: 8px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: bold;
+  z-index: 999998;
+  font-family: Arial, sans-serif;
+}
+
+.suraksha-safe {
+  background: #4CAF50;
+  color: white;
+}
+
+.suraksha-warning-low {
+  background: #FF9800;
+  color: white;
+}
+
+.suraksha-warning-medium {
+  background: #FF5722;
+  color: white;
+}
+
+.suraksha-warning-high {
+  background: #F44336;
+  color: white;
+}

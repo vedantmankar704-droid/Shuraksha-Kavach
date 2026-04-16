@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Suraksha Kavach",
+  "name": "Suraksha Kavach Test",
   "version": "1.0.0",
-  "description": "AI-powered phishing website and fraudulent email detector",
+  "description": "Test version for debugging",
   "permissions": ["storage", "activeTab", "scripting", "tabs"],
   "host_permissions": ["<all_urls>"],
   "content_security_policy": {
@@ -12,14 +12,13 @@
     "service_worker": "background.js"
   },
   "action": {
-    "default_title": "Suraksha Kavach",
+    "default_title": "Suraksha Kavach Test",
     "default_popup": "popup.html"
   },
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["scanner.js"],
-      "css": ["styles.css"],
+      "js": ["content-minimal.js"],
       "run_at": "document_end"
     }
   ]
